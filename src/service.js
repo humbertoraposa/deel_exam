@@ -1,4 +1,4 @@
-const { Op } = require("sequelize");
+const { Op, QueryTypes } = require("sequelize");
 const { sequelize } = require("./model");
 
 const getContractById = async (req, res) => {
@@ -159,66 +159,35 @@ const deposit = async (req, res) => {
     res.status(200).json(`New balance for ${profile.firstName} ${profile.lastName} is ${balance}`)
 }
 const getBestProfessionByDate = async (req, res) => {
-    const {Contract, Profile, Job} = req.app.get('models')
+    
     const {start, end} = req.query
     const endDate = new Date(end)
     endDate.setDate(endDate.getDate() + 1 )
-    const best = await Job.findAll({
-        where:{
-            paid: true,
-            paymentDate:{
-                [Op.between]: [start,endDate]
-            }
-        },
-        attributes: [],
-        group: '`Contract->Contractor`.`profession`',
-        include:{
-            model:Contract,
-            required: true,
-            attributes: [],
-            include:{
-                model: Profile,
-                as: 'Contractor',
-                required: true,
-                attributes:[
-                    'profession',
-                ]
-            }
-        },
-        order: [[sequelize.fn('sum', sequelize.col('price')),'desc']],
-        limit: 1
-    })
+
+    const best = await sequelize.query(
+        'SELECT sum(`price`) as earned, `Contract->Contractor`.`profession` AS `profession` FROM `Jobs` AS `Job` INNER JOIN `Contracts` AS `Contract` ON `Job`.`ContractId` = `Contract`.`id` INNER JOIN `Profiles` AS `Contract->Contractor` ON `Contract`.`ContractorId` = `Contract->Contractor`.`id` WHERE `Job`.`paid` = 1 AND `Job`.`paymentDate` BETWEEN ? AND ? GROUP BY `Contract->Contractor`.`profession` ORDER BY sum(`price`) DESC LIMIT 1;',
+        {
+            replacements: [start, endDate],
+            type: QueryTypes.SELECT
+        }
+    ) 
+    
     if(!best) return res.status(404).end(`No payment was found in the given dates.`)
-    res.status(200).json(best)
+    res.status(200).json(best[0])
 }
 const getMostPaidByDate = async (req, res) => {
-    const {Contract, Profile, Job} = req.app.get('models')
+    
     const {start, end} = req.query
     const endDate = new Date(end)
     endDate.setDate(endDate.getDate() + 1 )
     const limit = req.query.limit || 2
-    const best = await Job.findAll({
-        where:{
-            attributes: [],
-            paid: true,
-            paymentDate:{
-                [Op.between]: [start,endDate]
-            }
-        },
-        group: '`Contract->Client`.`id`',
-        include:{
-            model:Contract,
-            required: true,
-            attributes: [],
-            include:{
-                model: Profile,
-                as: 'Client',
-                required: true,
-            }
-        },
-        order: [['sum','desc']],
-        limit
-    })
+    const best = await sequelize.query('SELECT sum(`price`) as paid, `Contract->Client`.`id` AS `ClientId`, `Contract->Client`.`firstName` AS `Client First Name`, `Contract->Client`.`lastName` AS `Client Last Name` FROM `Jobs` AS `Job` INNER JOIN `Contracts` AS `Contract` ON `Job`.`ContractId` = `Contract`.`id` INNER JOIN `Profiles` AS `Contract->Client` ON `Contract`.`ClientId` = `Contract->Client`.`id` WHERE `Job`.`paid` = 1 AND `Job`.`paymentDate` BETWEEN ? AND ? GROUP BY `Contract->Client`.`id` ORDER BY sum(`price`) DESC LIMIT ? ;',
+        {
+            replacements: [start, endDate, limit],
+            type: QueryTypes.SELECT
+            
+        })
+    
     if(!best) return res.status(404).end(`No payment was found in the given dates.`)
     res.status(200).json(best)
     
